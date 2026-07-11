@@ -2,18 +2,19 @@
 
 ``python -m slither_bot probe``
 
-1. verifies every JS global the bot depends on (see js_bridge.py) and, if
-   any are missing, scans ``window`` for plausible replacements to try;
-2. joins a game — automatically if possible, otherwise it prints a full menu
-   diagnosis (page protocol, join state machine, candidate buttons, consent
-   overlays) and waits for you to click Play yourself;
+1. verifies every JS global the bot depends on (see js_bridge.py);
+2. joins a game — automatically if possible; if the game is joined but the
+   snake state globals are invisible (a renamed client build), it scans
+   ``window`` for the new names, live-verifies them, and continues; if the
+   join fails outright it prints a full menu diagnosis and waits for you to
+   click Play yourself;
 3. measures the real speed (wu/s vs ``.sp``) and reports the radius estimate,
    so the unit constants can be corrected;
 4. times the READ_STATE round-trip to confirm the control rate is feasible;
 5. dumps one raw game state as a JSON fixture for the offline parse tests.
 
-Every outcome (including failure) writes ``probe_report.json`` and exits
-without a traceback.
+Every outcome (including failure and a closed browser window) writes
+``probe_report.json`` and exits without a traceback.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from selenium.common.exceptions import WebDriverException
 
 from slither_bot.live import js_bridge
 from slither_bot.live.backend import LiveBackend
@@ -35,6 +37,41 @@ def _missing(globals_found: dict) -> list[str]:
     # None = undefined (truly missing); 'null' in-game means declared but
     # never populated — equally unusable, so both count.
     return [n for n in CRITICAL if globals_found.get(n) in (None, "null")]
+
+
+def _rescue_renamed_globals(driver, backend: LiveBackend, report: dict) -> bool:
+    """In-game but READ_STATE can't see the snake: find the renamed globals,
+    apply them for this session, and verify end-to-end."""
+    print("\nin-game but the snake state globals are missing — scanning window ...")
+    scan = driver.execute_script(js_bridge.SCAN)
+    report["scan"] = scan
+    for a in scan.get("arrays", []):
+        print(f"  array  window.{a['name']:<16} len={a['length']:<6} keys={a['keys']}")
+    for o in scan.get("objects", []):
+        print(f"  object window.{o['name']:<16} keys={o['keys']}")
+    suggestion = scan.get("suggestion") or {}
+    if not any(suggestion.get(k) for k in ("snake", "snakes", "foods")):
+        print("scanner found no plausible candidates — full scan in probe_report.json")
+        return False
+
+    print(f"scanner suggestion: {suggestion}")
+    js_bridge.set_global_names(
+        snake=suggestion.get("snake"),
+        snakes=suggestion.get("snakes"),
+        foods=suggestion.get("foods"),
+    )
+    raw = backend._read_raw()
+    if raw.get("playing") and not raw.get("snake_missing") and js_bridge.parse_state(raw).alive:
+        names = dict(js_bridge.GLOBALS)
+        report["renamed_globals"] = names
+        print(f"\nVERIFIED renamed globals: {names}")
+        print(
+            "-> make this permanent: set these values in GLOBALS at the top of "
+            "slither_bot/live/js_bridge.py"
+        )
+        return True
+    print("suggested names did not verify — full scan in probe_report.json")
+    return False
 
 
 def cmd_probe(args) -> int:
@@ -75,22 +112,43 @@ def cmd_probe(args) -> int:
                 print("\nfull menu diagnosis:")
                 print(json.dumps(backend.join_diagnosis, indent=2))
 
-            headless = backend.headless or os.environ.get("SLITHER_BOT_HEADLESS") == "1"
-            if headless:
-                print("\nheadless session — skipping the manual-join fallback")
-            else:
-                wait = getattr(args, "manual_join_timeout", 90.0)
-                print(
-                    f"\nclick Play manually in the opened Chrome window — "
-                    f"waiting up to {wait:.0f}s ..."
-                )
-                deadline = time.monotonic() + wait
-                while time.monotonic() < deadline:
-                    time.sleep(1.0)
-                    if backend.read_percept().alive:
-                        joined = True
-                        report["joined_manually"] = True
-                        print("joined manually — continuing the probe")
+            # Are we actually in a game whose state we just can't see?
+            raw = backend._read_raw()
+            if raw.get("playing"):
+                if raw.get("snake_missing"):
+                    joined = _rescue_renamed_globals(driver, backend, report)
+                else:
+                    joined = True  # joined in the race between timeout and now
+
+            if not joined:
+                headless = backend.headless or os.environ.get("SLITHER_BOT_HEADLESS") == "1"
+                if headless:
+                    print("\nheadless session — skipping the manual-join fallback")
+                else:
+                    wait = getattr(args, "manual_join_timeout", 90.0)
+                    print(
+                        f"\nclick Play manually in the opened Chrome window — "
+                        f"waiting up to {wait:.0f}s ..."
+                    )
+                    deadline = time.monotonic() + wait
+                    while time.monotonic() < deadline:
+                        time.sleep(1.0)
+                        try:
+                            raw = backend._read_raw()
+                        except WebDriverException as werr:
+                            print(
+                                f"browser window closed ({type(werr).__name__}) — "
+                                "aborting the wait"
+                            )
+                            break
+                        if not raw.get("playing"):
+                            continue
+                        if raw.get("snake_missing"):
+                            joined = _rescue_renamed_globals(driver, backend, report)
+                        else:
+                            joined = True
+                            report["joined_manually"] = True
+                            print("joined manually — continuing the probe")
                         break
 
         if not joined:
@@ -105,12 +163,12 @@ def cmd_probe(args) -> int:
         if missing:
             print(f"\nMISSING in-game globals: {missing}")
             print("scanning window for arrays of objects with .xx/.yy ...")
-            candidates = driver.execute_script(js_bridge.SCAN)
-            report["scan_candidates"] = candidates
-            for c in candidates:
+            scan = driver.execute_script(js_bridge.SCAN)
+            report["scan"] = scan
+            for c in scan.get("arrays", []):
                 print(f"  window.{c['name']} length={c['length']} keys={c['keys']}")
             print(
-                "\nUpdate the names at the top of slither_bot/live/js_bridge.py "
+                "\nUpdate the GLOBALS values at the top of slither_bot/live/js_bridge.py "
                 "to match one of the candidates above, then re-run the probe."
             )
             write_report()
@@ -126,7 +184,7 @@ def cmd_probe(args) -> int:
         samples = []
         for _ in range(30):
             raw = driver.execute_script(js_bridge.READ_STATE, backend.view_radius)
-            if not raw.get("playing"):
+            if not raw.get("playing") or raw.get("snake_missing"):
                 break
             me = raw["self"]
             samples.append((raw["t"], me["x"], me["y"], me["sp"], me["sc"]))
@@ -174,7 +232,7 @@ def cmd_probe(args) -> int:
         )
 
         # --- fixture dump for the offline parse tests
-        if raw and raw.get("playing"):
+        if raw and raw.get("playing") and not raw.get("snake_missing"):
             fixture_path = Path(args.fixture)
             fixture_path.parent.mkdir(parents=True, exist_ok=True)
             fixture_path.write_text(json.dumps(raw, indent=2))
@@ -194,7 +252,19 @@ def cmd_probe(args) -> int:
 
         write_report()
         print(f"\nwrote {out_dir / 'probe_report.json'} — probe PASSED")
+        if report.get("renamed_globals"):
+            print(
+                f"\nREMINDER: this client renamed its state globals. Set GLOBALS in "
+                f"slither_bot/live/js_bridge.py to {report['renamed_globals']} "
+                f"so run/eval work without the probe."
+            )
         return 0
+    except WebDriverException as exc:
+        first_line = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        print(f"\nbrowser session ended unexpectedly ({type(exc).__name__}: {first_line})")
+        report["error"] = f"{type(exc).__name__}: {first_line}"
+        write_report()
+        return 1
     finally:
         try:
             write_report()

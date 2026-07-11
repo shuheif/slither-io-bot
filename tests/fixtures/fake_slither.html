@@ -15,7 +15,11 @@
        consent         'full' plus a Funding-Choices-style consent overlay —
                        exercises DISMISS_CONSENT
        deadmenu        nothing to click and no connect() — join is impossible,
-                       exercises the timeout + DIAGNOSE_MENU path -->
+                       exercises the timeout + DIAGNOSE_MENU path
+       renamed         'full' but the state globals are named slither /
+                       slithers / fud (snake/snakes/foods left undefined) —
+                       exercises the snake_missing fail-fast and the probe's
+                       scan -> set_global_names -> verify rescue -->
 <head><meta charset="utf-8"><title>fake slither</title></head>
 <body>
 <div id="login">
@@ -25,6 +29,12 @@
 <script>
 var variant = new URLSearchParams(location.search).get('variant') || 'full';
 
+// The 'renamed' variant simulates a client build whose minifier changed the
+// state global names; snake/snakes/foods stay UNDEFINED there.
+var NAMES = variant === 'renamed'
+  ? {snake: 'slither', snakes: 'slithers', foods: 'fud'}
+  : {snake: 'snake', snakes: 'snakes', foods: 'foods'};
+
 window.playing = false;
 window.connecting = false;
 window.connected = false;
@@ -33,9 +43,9 @@ window.waiting_for_sos = false;
 window.grd = 21600;
 window.xm = 0;
 window.ym = 0;
-window.foods = [];
-window.snakes = [];
-window.snake = null;
+window[NAMES.foods] = [];
+window[NAMES.snakes] = [];
+window[NAMES.snake] = null;
 window.boostState = 0;
 window.dead_mtm = -1;
 window.login_fr = 0;
@@ -43,19 +53,19 @@ window.sos = [{ip: '127.0.0.1', po: 444}];
 window.setAcceleration = function (n) { window.boostState = n; };
 
 function startGame() {
-  window.snake = {
+  window[NAMES.snake] = {
     id: 1, xx: 21600, yy: 21600, ang: 0, sp: 5.78, sc: 1.0, sct: 10,
     pts: [{xx: 21590, yy: 21600, dying: false}]
   };
-  window.snakes = [
-    window.snake,
+  window[NAMES.snakes] = [
+    window[NAMES.snake],
     { id: 2, xx: 21800, yy: 21650, ang: Math.PI, sp: 5.5, sc: 1.1,
       pts: [{xx: 21800, yy: 21650, dying: false},
             {xx: 21815, yy: 21650, dying: false},
             {xx: 21830, yy: 21650, dying: false},
             null] }
   ];
-  window.foods = [
+  window[NAMES.foods] = [
     {xx: 21650, yy: 21580, sz: 5}, null, {xx: 21550, yy: 21630, sz: 2}
   ];
   window.connecting = false;
@@ -72,7 +82,7 @@ if (variant !== 'deadmenu') {
   };
 }
 
-if (variant === 'full' || variant === 'consent') {
+if (variant === 'full' || variant === 'consent' || variant === 'renamed') {
   // The real client builds the button in JS and joins via play_btn.elem.onclick,
   // which latches want_play; the main loop then calls connect().
   var pbdiv = document.createElement('div');
@@ -118,8 +128,8 @@ setInterval(function () {
     window.want_play = false;
     if (typeof window.connect === 'function') { window.connect(); }
   }
-  if (!window.playing || !window.snake) return;
-  var s = window.snake;
+  if (!window.playing || !window[NAMES.snake]) return;
+  var s = window[NAMES.snake];
   if (window.xm !== 0 || window.ym !== 0) {
     s.ang = Math.atan2(window.ym, window.xm);
   }

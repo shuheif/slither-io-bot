@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from slither_bot.live import js_bridge
 from slither_bot.live.js_bridge import RADIUS_PER_SC, SPEED_SCALE, parse_state
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -76,6 +77,10 @@ class TestParseState:
         assert parse_state({}).alive is False
         assert parse_state(None).alive is False
 
+    def test_snake_missing_is_dead(self):
+        # In-game but the state globals are renamed: unusable percept.
+        assert parse_state({"playing": True, "snake_missing": True}).alive is False
+
     def test_planner_accepts_parsed_percept(self, raw):
         from slither_bot.planners.cbf import CBFPlanner
 
@@ -90,6 +95,37 @@ class TestParseState:
         percept = parse_state(json.loads(real.read_text()))
         assert percept.alive
         assert np.isfinite(percept.self_snake.head).all()
+
+
+class TestGlobalNameTemplating:
+    def test_snippets_are_fully_rendered(self):
+        for js in (js_bridge.READ_STATE, js_bridge.PROBE, js_bridge.DIAGNOSE_MENU):
+            assert "__SNAKE__" not in js
+            assert "__SNAKES__" not in js
+            assert "__FOODS__" not in js
+        assert 'window["snake"]' in js_bridge.READ_STATE
+        assert 'window["snakes"]' in js_bridge.READ_STATE
+        assert 'window["foods"]' in js_bridge.READ_STATE
+
+    def test_set_global_names_round_trip(self):
+        try:
+            js_bridge.set_global_names(snakes="slithers", foods="fud")
+            assert js_bridge.GLOBALS["snakes"] == "slithers"
+            assert 'window["slithers"]' in js_bridge.READ_STATE
+            assert 'window["fud"]' in js_bridge.READ_STATE
+            assert 'window["slithers"]' in js_bridge.PROBE
+        finally:
+            js_bridge.set_global_names(snake="snake", snakes="snakes", foods="foods")
+        assert 'window["snakes"]' in js_bridge.READ_STATE
+
+    def test_none_values_keep_current_names(self):
+        before = dict(js_bridge.GLOBALS)
+        js_bridge.set_global_names(snake=None, snakes=None)
+        assert js_bridge.GLOBALS == before
+
+    def test_unknown_key_raises(self):
+        with pytest.raises(KeyError):
+            js_bridge.set_global_names(bogus="x")
 
 
 class TestLiveBackendOffline:

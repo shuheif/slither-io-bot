@@ -27,6 +27,16 @@ pytestmark = pytest.mark.skipif(
 FAKE_PAGE = (Path(__file__).parent / "fixtures" / "fake_slither.html").resolve()
 
 
+@pytest.fixture(autouse=True)
+def _restore_global_names():
+    # The probe's rescue path rebinds js_bridge.GLOBALS for the session;
+    # keep tests independent of each other.
+    yield
+    from slither_bot.live import js_bridge
+
+    js_bridge.set_global_names(snake="snake", snakes="snakes", foods="foods")
+
+
 def page_url(variant: str | None = None) -> str:
     return FAKE_PAGE.as_uri() + (f"?variant={variant}" if variant else "")
 
@@ -143,6 +153,48 @@ def test_probe_against_fake_page(tmp_path, capsys):
     assert (tmp_path / "live_dump.json").exists()
     report = json.loads((tmp_path / "probe_report.json").read_text())
     assert report["grd_in_game"] == 21600
+
+
+def test_renamed_globals_fail_fast_with_targeted_message():
+    backend = make_backend("renamed", play_timeout=15.0)
+    try:
+        with pytest.raises(TimeoutError) as excinfo:
+            backend.reset()
+        message = str(excinfo.value)
+        assert "RENAMED" in message
+        assert "probe" in message
+        assert backend.join_diagnosis is not None
+        # Fail-fast: the snake_missing strikes trip long before play_timeout.
+        assert backend.join_diagnosis["globals"]["playing"] is True
+    finally:
+        backend.close()
+
+
+def test_probe_rescues_renamed_globals_end_to_end(tmp_path, capsys):
+    from types import SimpleNamespace
+
+    from slither_bot.live import js_bridge
+    from slither_bot.live.probe import cmd_probe
+
+    args = SimpleNamespace(
+        url=page_url("renamed"),
+        out=str(tmp_path),
+        fixture=str(tmp_path / "live_dump.json"),
+        play_timeout=15.0,
+        manual_join_timeout=2.0,
+        server=None,
+    )
+    rc = cmd_probe(args)
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "VERIFIED renamed globals" in out
+    assert "probe PASSED" in out
+    assert "Traceback" not in out
+    assert js_bridge.GLOBALS["snakes"] == "slithers"  # applied for the session
+
+    report = json.loads((tmp_path / "probe_report.json").read_text())
+    assert report["renamed_globals"] == {"snake": "slither", "snakes": "slithers", "foods": "fud"}
+    assert (tmp_path / "live_dump.json").exists()  # measurements + fixture still ran
 
 
 def test_probe_dead_menu_reports_instead_of_crashing(tmp_path, capsys):

@@ -209,14 +209,18 @@ automatically; override with `SLITHER_BOT_CHROME_BINARY` /
    python -m slither_bot probe
    ```
 
-   If it reports missing globals (the client changed since 2022), it prints
-   the plausible replacements it found; update the names at the top of
-   `slither_bot/live/js_bridge.py` and re-probe. If the measured
-   `SPEED_SCALE` / radius differ from the constants there, update those too.
-   If **auto-join fails**, the probe prints a full menu diagnosis (page
-   protocol, join state, candidate buttons, consent overlays) and then waits
-   for you to click Play yourself, so the measurements and fixture dump still
-   complete. `--play-timeout` and `--server IP:PORT` (pin a game server via
+   Current client builds **rename** some state globals (a 2026 build was
+   observed with `window.snake`/`window.snakes` gone while everything else
+   survived). The probe handles this: when it detects a joined game whose
+   state it cannot see, it scans `window` for the new names, **verifies them
+   live**, finishes its measurements with them, and prints the exact values
+   to make permanent in `GLOBALS` at the top of
+   `slither_bot/live/js_bridge.py`. If the measured `SPEED_SCALE` / radius
+   differ from the constants there, update those too.
+   If **auto-join fails outright**, the probe prints a full menu diagnosis
+   (page protocol, join state machine, candidate buttons, consent overlays)
+   and then waits for you to click Play yourself, so the verification still
+   completes. `--play-timeout` and `--server IP:PORT` (pin a game server via
    the client's `forceServer`) are available on probe/run/eval.
 2. **Steering sanity** — one minute of the random pilot; the cursor is never
    touched and the snake must not boost:

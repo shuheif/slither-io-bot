@@ -99,10 +99,13 @@ class LiveBackend:
             self.driver.get(self.url)
         return self.driver
 
+    def _read_raw(self) -> dict:
+        return self._ensure_driver().execute_script(js_bridge.READ_STATE, self.view_radius) or {}
+
     def read_percept(self) -> Percept:
-        raw = self._ensure_driver().execute_script(js_bridge.READ_STATE, self.view_radius)
+        raw = self._read_raw()
         t_rel = 0.0
-        if raw and raw.get("playing"):
+        if raw.get("playing") and not raw.get("snake_missing"):
             if self._t0 is None:
                 self._t0 = float(raw["t"])
             t_rel = float(raw["t"]) - self._t0
@@ -138,8 +141,19 @@ class LiveBackend:
         force_at = time.monotonic() + self.play_timeout / 2.0
         attempt = 0
         last_line = None
-        percept = self.read_percept()
-        while not percept.alive and time.monotonic() < deadline:
+        snake_missing_strikes = 0
+        raw = self._read_raw()
+        while (
+            not (raw.get("playing") and not raw.get("snake_missing"))
+            and time.monotonic() < deadline
+        ):
+            if raw.get("snake_missing"):
+                # We ARE in a game, but the state globals are renamed in this
+                # client build — waiting longer cannot help; fail fast so the
+                # probe's scanner can take over.
+                snake_missing_strikes += 1
+                if snake_missing_strikes >= 3:
+                    break
             attempt += 1
             # After half the budget with no join, break any stuck client latch
             # by escalating to a direct connect().
@@ -159,16 +173,35 @@ class LiveBackend:
             if consent_found and attempt % 5 == 0:
                 driver.execute_script(js_bridge.DISMISS_CONSENT)
             time.sleep(1.0)
-            percept = self.read_percept()
+            raw = self._read_raw()
 
-        if not percept.alive:
+        if not raw.get("playing") or raw.get("snake_missing"):
             try:
                 self.join_diagnosis = driver.execute_script(js_bridge.DIAGNOSE_MENU)
             except Exception:
                 self.join_diagnosis = None
+            if raw.get("snake_missing"):
+                raise TimeoutError(self._snake_missing_message())
             raise TimeoutError(self._join_failure_message())
+        percept = self.read_percept()
         self._next_tick = time.monotonic() + self.dt
         return percept
+
+    def _snake_missing_message(self) -> str:
+        names = {key: js_bridge.GLOBALS[key] for key in ("snake", "snakes", "foods")}
+        diag = (
+            json.dumps(self.join_diagnosis, separators=(",", ":"))[:1200]
+            if self.join_diagnosis
+            else "unavailable"
+        )
+        return (
+            "joined a game (window.playing is true) but the snake state globals "
+            f"{names} are absent — this client build RENAMED them.\n"
+            "run `python -m slither_bot probe`: it scans for the new names, verifies them "
+            "live, and prints the values to put in GLOBALS at the top of "
+            "slither_bot/live/js_bridge.py.\n"
+            f"menu diagnosis: {diag}"
+        )
 
     def _join_failure_message(self) -> str:
         diag = self.join_diagnosis or {}
