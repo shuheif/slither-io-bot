@@ -48,6 +48,7 @@ def run_episode(
     max_time: float = 300.0,
     viz=None,
 ) -> EpisodeResult:
+    """Drive one episode; ``max_time <= 0`` disables the cap (run until death)."""
     percept: Percept = backend.reset(seed)
     t0 = percept.t
     trajectory = [percept.self_snake.head.copy()]
@@ -57,7 +58,7 @@ def run_episode(
     arena_center = None if percept.arena_center is None else percept.arena_center.copy()
     arena_radius = percept.arena_radius
 
-    while percept.alive and percept.t - t0 < max_time:
+    while percept.alive and (max_time <= 0 or percept.t - t0 < max_time):
         action = planner.plan(percept)
         if viz is not None:
             viz.update(percept, action, getattr(planner, "debug", None))

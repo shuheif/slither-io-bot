@@ -40,6 +40,17 @@ def test_evaluate_three_planners(tmp_path):
     assert (tmp_path / "eval_table.md").read_text().count("|") > 10
 
 
+def test_max_time_zero_disables_the_cap():
+    from slither_bot.eval.runner import run_episode
+    from slither_bot.planners import make_planner
+
+    # Uncapped episode ends by death, never by timeout (random dies fast).
+    backend = SimBackend(SimConfig(), seed=1)
+    result = run_episode(backend, make_planner("random", seed=1), "random", 1, max_time=0.0)
+    assert result.cause != "timeout"
+    assert result.survival_time > 0.0
+
+
 def test_split_params_prefixes():
     per = split_params({"cbf.gamma": "2.0"}, ["cbf", "apf"])
     assert per == {"cbf": {"gamma": "2.0"}, "apf": {}}

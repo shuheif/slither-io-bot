@@ -12,7 +12,12 @@ def _add_common_run_args(p: argparse.ArgumentParser) -> None:
                    help="pin a specific game server via window.forceServer (live/vision)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--hz", type=float, default=15.0, help="control loop rate (live pacing / sim dt)")
-    p.add_argument("--max-time", type=float, default=300.0, help="episode time cap, seconds")
+    p.add_argument(
+        "--max-time",
+        type=float,
+        default=300.0,
+        help="episode time cap in seconds; 0 = no cap, play until death (default 300)",
+    )
     p.add_argument("--render", action="store_true", help="save trajectory/barrier plots")
     p.add_argument(
         "--viz",
