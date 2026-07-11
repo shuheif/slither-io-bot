@@ -111,7 +111,7 @@ def make_backend(args) -> Backend:
     if args.backend == "vision":
         from slither_bot.live.vision_backend import VisionBackend
 
-        return VisionBackend(hz=args.hz)
+        return VisionBackend(url=args.url, hz=args.hz, allow_boost=args.boost)
     raise SystemExit(f"unknown backend {args.backend!r}")
 
 
