@@ -107,7 +107,7 @@ def make_backend(args) -> Backend:
     if args.backend == "live":
         from slither_bot.live.backend import LiveBackend
 
-        return LiveBackend(hz=args.hz)
+        return LiveBackend(url=args.url, hz=args.hz, allow_boost=args.boost)
     if args.backend == "vision":
         from slither_bot.live.vision_backend import VisionBackend
 

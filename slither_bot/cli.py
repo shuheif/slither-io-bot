@@ -5,6 +5,7 @@ import argparse
 
 def _add_common_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--backend", choices=["sim", "live", "vision"], default="sim")
+    p.add_argument("--url", default="http://slither.io", help="game URL (live/vision backends)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--hz", type=float, default=15.0, help="control loop rate (live pacing / sim dt)")
     p.add_argument("--max-time", type=float, default=300.0, help="episode time cap, seconds")

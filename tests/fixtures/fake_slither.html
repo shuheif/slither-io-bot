@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<!-- A minimal stand-in for slither.io exposing the same JS globals the bot
+     uses (see slither_bot/live/js_bridge.py), so the Selenium plumbing can be
+     integration-tested without network access to the real game.
+     Served from disk; used by tests/test_live_integration.py. -->
+<head><meta charset="utf-8"><title>fake slither</title></head>
+<body>
+<div id="playh"><div class="btnt">Play</div></div>
+<input id="nick" value="">
+<script>
+window.playing = false;
+window.grd = 21600;
+window.xm = 0;
+window.ym = 0;
+window.foods = [];
+window.snakes = [];
+window.snake = null;
+window.boostState = 0;
+window.setAcceleration = function (n) { window.boostState = n; };
+
+function startGame() {
+  window.snake = {
+    id: 1, xx: 21600, yy: 21600, ang: 0, sp: 5.78, sc: 1.0, sct: 10,
+    pts: [{xx: 21590, yy: 21600, dying: false}]
+  };
+  window.snakes = [
+    window.snake,
+    { id: 2, xx: 21800, yy: 21650, ang: Math.PI, sp: 5.5, sc: 1.1,
+      pts: [{xx: 21800, yy: 21650, dying: false},
+            {xx: 21815, yy: 21650, dying: false},
+            {xx: 21830, yy: 21650, dying: false},
+            null] }
+  ];
+  window.foods = [
+    {xx: 21650, yy: 21580, sz: 5}, null, {xx: 21550, yy: 21630, sz: 2}
+  ];
+  window.playing = true;
+}
+document.querySelector('#playh .btnt').addEventListener('click', startGame);
+
+// 30 Hz game loop: steer toward atan2(ym, xm) like the real client.
+setInterval(function () {
+  if (!window.playing || !window.snake) return;
+  var s = window.snake;
+  if (window.xm !== 0 || window.ym !== 0) {
+    s.ang = Math.atan2(window.ym, window.xm);
+  }
+  var v = 185 * (window.boostState ? 2 : 1) / 30.0;  // wu per tick
+  s.xx += v * Math.cos(s.ang);
+  s.yy += v * Math.sin(s.ang);
+}, 33);
+</script>
+</body>
+</html>
