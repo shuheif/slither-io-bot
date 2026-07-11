@@ -14,7 +14,13 @@ from pathlib import Path
 import numpy as np
 
 from slither_bot.core import Backend
-from slither_bot.eval.runner import EpisodeResult, make_backend, parse_params, run_episode
+from slither_bot.eval.runner import (
+    EpisodeResult,
+    make_backend,
+    make_viz,
+    parse_params,
+    run_episode,
+)
 from slither_bot.planners import PLANNER_NAMES, make_planner
 
 
@@ -91,6 +97,7 @@ def evaluate(
     out_dir: str | Path,
     render: bool = False,
     params: dict[str, str] | None = None,
+    viz=None,
 ) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +109,7 @@ def evaluate(
         for episode in range(episodes):
             seed = base_seed + episode
             planner = make_planner(name, seed=seed, params=per_planner_params[name])
-            result = run_episode(backend, planner, name, seed, max_time)
+            result = run_episode(backend, planner, name, seed, max_time, viz=viz)
             results.append(result)
             print(
                 f"[{name} {episode + 1}/{episodes} seed={seed}] "
@@ -148,6 +155,7 @@ def cmd_eval(args) -> int:
         if name not in PLANNER_NAMES:
             raise SystemExit(f"unknown planner {name!r}; valid: {PLANNER_NAMES}")
     backend = make_backend(args)
+    viz = make_viz(args)
     try:
         evaluate(
             planner_names,
@@ -158,7 +166,10 @@ def cmd_eval(args) -> int:
             out_dir=args.out,
             render=args.render,
             params=parse_params(args.param),
+            viz=viz,
         )
     finally:
+        if viz is not None:
+            viz.close()
         backend.close()
     return 0

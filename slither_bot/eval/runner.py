@@ -46,6 +46,7 @@ def run_episode(
     planner_name: str,
     seed: int,
     max_time: float = 300.0,
+    viz=None,
 ) -> EpisodeResult:
     percept: Percept = backend.reset(seed)
     t0 = percept.t
@@ -58,6 +59,8 @@ def run_episode(
 
     while percept.alive and percept.t - t0 < max_time:
         action = planner.plan(percept)
+        if viz is not None:
+            viz.update(percept, action, getattr(planner, "debug", None))
         percept = backend.step(action)
         trajectory.append(percept.self_snake.head.copy())
         tick_times.append(percept.t - t0)
@@ -127,17 +130,31 @@ def make_backend(args) -> Backend:
     raise SystemExit(f"unknown backend {args.backend!r}")
 
 
+def make_viz(args):
+    """Build the live side window when --viz is set; degrade gracefully."""
+    if not getattr(args, "viz", False):
+        return None
+    try:
+        from slither_bot.viz import LiveViz
+
+        return LiveViz(update_every=args.viz_every)
+    except Exception as exc:  # no display / matplotlib trouble: keep playing
+        print(f"--viz unavailable ({exc}); continuing without it")
+        return None
+
+
 def cmd_run(args) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     params = parse_params(args.param)
 
     backend = make_backend(args)
+    viz = make_viz(args)
     try:
         for episode in range(args.episodes):
             seed = args.seed + episode
             planner = make_planner(args.planner, seed=seed, params=params)
-            result = run_episode(backend, planner, args.planner, seed, args.max_time)
+            result = run_episode(backend, planner, args.planner, seed, args.max_time, viz=viz)
             print(
                 f"[{args.planner} seed={seed}] survived {result.survival_time:.1f}s, "
                 f"score={result.score:.0f}, cause={result.cause}, ticks={result.ticks}"
@@ -153,5 +170,7 @@ def cmd_run(args) -> int:
                 if h_png is not None:
                     print(f"  wrote {h_png}")
     finally:
+        if viz is not None:
+            viz.close()
         backend.close()
     return 0

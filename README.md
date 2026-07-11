@@ -192,6 +192,10 @@ python -m pytest -q                                    # 73 tests, all offline
 # watch one CBF episode in the simulator (writes trajectory + h_min PNGs)
 python -m slither_bot run --backend sim --planner cbf --seed 3 --render --out results/
 
+# watch it THINK: live side window with the percept, per-segment barrier
+# clearance, the feasible-heading ring, and the QP/commanded directions
+python -m slither_bot run --backend sim --planner cbf --seed 3 --viz
+
 # reproduce the comparison table (few minutes)
 python -m slither_bot eval --planners random,apf,cbf --episodes 20 --seed 7 --render --out results/eval20
 ```
@@ -229,10 +233,12 @@ automatically; override with `SLITHER_BOT_CHROME_BINARY` /
    ```bash
    python -m slither_bot run --backend live --planner random --max-time 60
    ```
-3. **The real thing**:
+3. **The real thing** (add `--viz` for a live side window showing what the
+   planner sees and computes — barrier clearances, the feasible-heading ring,
+   nominal vs QP vs commanded directions):
 
    ```bash
-   python -m slither_bot run --backend live --planner cbf --episodes 3
+   python -m slither_bot run --backend live --planner cbf --episodes 3 --viz
    python -m slither_bot eval --backend live --planners apf,cbf --episodes 5   # long
    ```
 4. **Commit the fixture** `tests/fixtures/live_dump.json` written by the probe

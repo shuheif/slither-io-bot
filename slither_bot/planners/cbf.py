@@ -150,7 +150,7 @@ class CBFPlanner:
         # --- stage 2: project onto the executable-safe heading arcs ---
         h_min = min(h_values) if h_values else np.inf
         urgent = h_min < cfg.h_urgent_radii * r
-        heading, pref_was_feasible = self._project_heading(
+        heading, pref_was_feasible, arc_thetas, arc_margins = self._project_heading(
             theta_pref, s.heading, v, normals, rhs, urgent
         )
         self._last_cmd = heading
@@ -168,6 +168,8 @@ class CBFPlanner:
             "u_nom_heading": theta_nom,
             "heading": heading,
             "solver_failures": self._solver_failures,
+            "arc_thetas": arc_thetas,  # sampled headings (abs), None when no rows
+            "arc_margins": arc_margins,  # worst constraint margin per heading
         }
         return Action(heading=heading)
 
@@ -179,7 +181,7 @@ class CBFPlanner:
         normals: list[np.ndarray],
         rhs: list[float],
         urgent: bool,
-    ) -> tuple[float, bool]:
+    ) -> tuple[float, bool, np.ndarray | None, np.ndarray | None]:
         """Pick a commanded heading satisfying every arc constraint
         ``v * (g_i . e(theta)) >= rhs_i``; the max-margin heading if none does.
 
@@ -191,10 +193,11 @@ class CBFPlanner:
         longer matters: pick the feasible heading nearest the currently
         executed one — the escape the snake can actually reach fastest.
 
-        Returns ``(theta, pref_was_feasible)``.
+        Returns ``(theta, pref_was_feasible, sampled_thetas, worst_margins)``
+        — the last two feed the live visualization (None when no rows).
         """
         if not normals:
-            return theta_pref, True
+            return theta_pref, True, None, None
 
         offsets = np.linspace(-np.pi, np.pi, self.cfg.arc_samples, endpoint=False)
         thetas = theta_pref + offsets
@@ -207,7 +210,7 @@ class CBFPlanner:
         pref_ok = bool(feasible[zero_idx])
 
         if not np.any(feasible):
-            return wrap_angle(float(thetas[int(np.argmax(worst))])), False
+            return wrap_angle(float(thetas[int(np.argmax(worst))])), False, thetas, worst
 
         idx = np.flatnonzero(feasible)
         if urgent:
@@ -220,5 +223,5 @@ class CBFPlanner:
                 )
         best = idx[int(np.argmin(cost))]
         if pref_ok and not urgent and best == zero_idx:
-            return theta_pref, True
-        return wrap_angle(float(thetas[best])), pref_ok
+            return theta_pref, True, thetas, worst
+        return wrap_angle(float(thetas[best])), pref_ok, thetas, worst

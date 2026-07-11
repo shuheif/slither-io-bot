@@ -1,15 +1,17 @@
-"""Headless-safe matplotlib rendering of episode artifacts (PNG files only)."""
+"""Headless-safe rendering of episode artifacts (PNG files only).
+
+Uses the object-oriented Figure API rather than pyplot so it never selects a
+global matplotlib backend — the live --viz window (slither_bot/viz.py) needs
+the interactive backend to stay available.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.patches import Circle
 
 
 def render_trajectory(result, path: str | Path) -> Path:
@@ -17,9 +19,10 @@ def render_trajectory(result, path: str | Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(7, 7))
+    fig = Figure(figsize=(7, 7))
+    ax = fig.add_subplot(111)
     if result.arena_radius is not None:
-        wall = plt.Circle(result.arena_center, result.arena_radius, fill=False, color="0.4")
+        wall = Circle(tuple(result.arena_center), result.arena_radius, fill=False, color="0.4")
         ax.add_patch(wall)
         lim = 1.05 * result.arena_radius
         ax.set_xlim(result.arena_center[0] - lim, result.arena_center[0] + lim)
@@ -43,7 +46,6 @@ def render_trajectory(result, path: str | Path) -> Path:
         f"score={result.score:.0f}, cause={result.cause}"
     )
     fig.savefig(path, dpi=110, bbox_inches="tight")
-    plt.close(fig)
     return path
 
 
@@ -56,7 +58,8 @@ def render_h_min(result, path: str | Path) -> Path | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     ts, hs = zip(*series)
 
-    fig, ax = plt.subplots(figsize=(8, 3.5))
+    fig = Figure(figsize=(8, 3.5))
+    ax = fig.add_subplot(111)
     ax.plot(ts, hs, lw=1.0)
     ax.axhline(0.0, color="tab:red", lw=1, ls="--", label="h = 0 (safety boundary)")
     ax.set_xlabel("t [s]")
@@ -64,5 +67,4 @@ def render_h_min(result, path: str | Path) -> Path | None:
     ax.set_title(f"{result.planner} seed={result.seed}: closest approach over time")
     ax.legend(loc="upper right")
     fig.savefig(path, dpi=110, bbox_inches="tight")
-    plt.close(fig)
     return path

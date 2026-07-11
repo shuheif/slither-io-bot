@@ -99,5 +99,6 @@ class APFPlanner:
             "f_rep_norm": float(np.linalg.norm(f_rep)),
             "n_obstacles": len(obstacles),
             "heading": heading,
+            "u_nom_heading": float(np.arctan2(f_att[1], f_att[0])),  # for the viz
         }
         return Action(heading=heading)
