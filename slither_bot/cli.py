@@ -6,6 +6,10 @@ import argparse
 def _add_common_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--backend", choices=["sim", "live", "vision"], default="sim")
     p.add_argument("--url", default="http://slither.io", help="game URL (live/vision backends)")
+    p.add_argument("--play-timeout", type=float, default=30.0,
+                   help="seconds to wait for auto-join before failing (live/vision)")
+    p.add_argument("--server", default=None, metavar="IP:PORT",
+                   help="pin a specific game server via window.forceServer (live/vision)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--hz", type=float, default=15.0, help="control loop rate (live pacing / sim dt)")
     p.add_argument("--max-time", type=float, default=300.0, help="episode time cap, seconds")
@@ -43,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="tests/fixtures/live_dump.json",
         help="where to write the captured game-state fixture",
     )
+    p_probe.add_argument("--play-timeout", type=float, default=30.0,
+                         help="seconds to attempt auto-join before falling back")
+    p_probe.add_argument("--manual-join-timeout", type=float, default=90.0,
+                         help="seconds to wait for a manual Play click after auto-join fails")
+    p_probe.add_argument("--server", default=None, metavar="IP:PORT",
+                         help="pin a specific game server via window.forceServer")
 
     return parser
 

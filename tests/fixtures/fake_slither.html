@@ -1,15 +1,35 @@
 <!DOCTYPE html>
 <html>
-<!-- A minimal stand-in for slither.io exposing the same JS globals the bot
-     uses (see slither_bot/live/js_bridge.py), so the Selenium plumbing can be
-     integration-tested without network access to the real game.
-     Served from disk; used by tests/test_live_integration.py. -->
+<!-- A minimal stand-in for slither.io exposing the same JS globals and JOIN
+     STATE MACHINE as the real client (see slither_bot/live/js_bridge.py), so
+     the Selenium plumbing and every join strategy can be integration-tested
+     without network access to the real game.
+
+     Variants via query string (?variant=X), used by tests/test_live_integration.py:
+       full (default)  script-built play button + window.play_btn object with a
+                       latching onclick, want_play -> connect() main loop —
+                       mirrors the real client; joins via play_btn.elem.onclick
+       domclick        button wired on mouseup only, no window.play_btn —
+                       exercises the real-event-dispatch strategy
+       nobutton        no button at all — exercises the direct connect() strategy
+       consent         'full' plus a Funding-Choices-style consent overlay —
+                       exercises DISMISS_CONSENT
+       deadmenu        nothing to click and no connect() — join is impossible,
+                       exercises the timeout + DIAGNOSE_MENU path -->
 <head><meta charset="utf-8"><title>fake slither</title></head>
 <body>
-<div id="playh"><div class="btnt">Play</div></div>
-<input id="nick" value="">
+<div id="login">
+  <div id="playh"></div>
+  <input id="nick" value="">
+</div>
 <script>
+var variant = new URLSearchParams(location.search).get('variant') || 'full';
+
 window.playing = false;
+window.connecting = false;
+window.connected = false;
+window.want_play = false;
+window.waiting_for_sos = false;
 window.grd = 21600;
 window.xm = 0;
 window.ym = 0;
@@ -17,6 +37,9 @@ window.foods = [];
 window.snakes = [];
 window.snake = null;
 window.boostState = 0;
+window.dead_mtm = -1;
+window.login_fr = 0;
+window.sos = [{ip: '127.0.0.1', po: 444}];
 window.setAcceleration = function (n) { window.boostState = n; };
 
 function startGame() {
@@ -35,12 +58,66 @@ function startGame() {
   window.foods = [
     {xx: 21650, yy: 21580, sz: 5}, null, {xx: 21550, yy: 21630, sz: 2}
   ];
+  window.connecting = false;
+  window.connected = true;
   window.playing = true;
 }
-document.querySelector('#playh .btnt').addEventListener('click', startGame);
 
-// 30 Hz game loop: steer toward atan2(ym, xm) like the real client.
+if (variant !== 'deadmenu') {
+  // Async like a real socket: connect() arms, the game starts a beat later.
+  window.connect = function () {
+    if (window.playing || window.connecting) return;
+    window.connecting = true;
+    setTimeout(startGame, 200);
+  };
+}
+
+if (variant === 'full' || variant === 'consent') {
+  // The real client builds the button in JS and joins via play_btn.elem.onclick,
+  // which latches want_play; the main loop then calls connect().
+  var pbdiv = document.createElement('div');
+  pbdiv.className = 'btnt nsi sadg1';
+  pbdiv.textContent = 'Play';
+  document.getElementById('playh').appendChild(pbdiv);
+  pbdiv.onclick = function () {
+    if (window.want_play || window.play_btn.disabled) return;
+    window.want_play = true;
+  };
+  window.play_btn = {disabled: false, elem: pbdiv, btnf: pbdiv};
+} else if (variant === 'domclick') {
+  var btn = document.createElement('div');
+  btn.className = 'btnt';
+  btn.textContent = 'Play';
+  document.getElementById('playh').appendChild(btn);
+  btn.addEventListener('mouseup', function () { window.want_play = true; });
+  // no window.play_btn: a changed-client build
+}
+// 'nobutton' and 'deadmenu': #playh stays empty
+
+if (variant === 'consent') {
+  var overlay = document.createElement('div');
+  overlay.className = 'fc-consent-root';
+  overlay.style.cssText =
+    'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1000;' +
+    'display:flex;align-items:center;justify-content:center;';
+  var accept = document.createElement('button');
+  accept.className = 'fc-cta-consent';
+  accept.textContent = 'Accept all';
+  accept.addEventListener('click', function () {
+    overlay.remove();
+    window.consentDismissed = true;
+  });
+  overlay.appendChild(accept);
+  document.body.appendChild(overlay);
+}
+
+// Main loop at ~30 Hz: want_play -> connect() (like the real client), then
+// steer toward atan2(ym, xm) and integrate constant-speed motion.
 setInterval(function () {
+  if (window.want_play && window.dead_mtm === -1 && !window.connecting && !window.playing) {
+    window.want_play = false;
+    if (typeof window.connect === 'function') { window.connect(); }
+  }
   if (!window.playing || !window.snake) return;
   var s = window.snake;
   if (window.xm !== 0 || window.ym !== 0) {

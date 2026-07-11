@@ -91,22 +91,171 @@ BOOST = """
 if (typeof window.setAcceleration === 'function') { window.setAcceleration(arguments[0]); }
 """
 
-# --- start a game from the menu; returns what it managed to do ---
+# --- start a game from the menu ---------------------------------------------
+# The client's own Enter-key handler runs `play_btn.elem.onclick()`, whose
+# handler latches `want_play`; the main loop then calls `connect()` once the
+# server list (`sos`, fetched from /i33628.txt) is ready.  One click is enough:
+# while `connecting`/`want_play`/`waiting_for_sos` the client is already busy
+# self-retrying (it rotates servers every ~3.3 s), so we report state instead
+# of clicking again.  Working bots' direct-join fallback is
+# `dead_mtm = 0; login_fr = 0; connect()` — it bypasses the button and ad
+# gates entirely and reads the nickname from #nick at ws.onopen.
+# arguments[0] = nickname, arguments[1] = force (skip buttons, connect() now).
+# Returns {strategy, state}.
 PLAY = """
+function st() {
+  return {
+    playing: !!window.playing,
+    connecting: !!window.connecting,
+    connected: !!window.connected,
+    want_play: !!window.want_play,
+    waiting_for_sos: !!window.waiting_for_sos,
+    sos_len: (window.sos && window.sos.length) || 0,
+    btn_disabled: !!(window.play_btn && window.play_btn.disabled),
+    dead_mtm: (typeof window.dead_mtm === 'number') ? window.dead_mtm : null,
+    protocol: location.protocol
+  };
+}
 const nick = document.getElementById('nick');
 if (nick && arguments[0]) { nick.value = arguments[0]; }
-const btn = document.querySelector('#playh .btnt')
-         || document.querySelector('#playh div')
-         || document.querySelector('.btnt');
-if (btn) { btn.click(); return 'clicked'; }
-if (typeof window.connect === 'function' && !window.playing) { window.connect(); return 'connected'; }
-return 'no-button';
+const force = !!arguments[1];
+const s0 = st();
+if (s0.playing) { return {strategy: 'already-playing', state: s0}; }
+if (!force && (s0.connecting || s0.want_play || s0.waiting_for_sos || s0.btn_disabled)) {
+  return {strategy: 'join-in-progress', state: s0};
+}
+const pb = window.play_btn;
+if (!force && pb && pb.elem && typeof pb.elem.onclick === 'function' && !pb.disabled) {
+  pb.elem.onclick();
+  return {strategy: 'play_btn.elem.onclick', state: st()};
+}
+if (!force) {
+  const btn = document.querySelector('#playh .btnt') || document.querySelector('#playh div');
+  if (btn) {
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      btn.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));
+    }
+    return {strategy: 'dom-events', state: st()};
+  }
+}
+if (typeof window.connect === 'function') {
+  window.dead_mtm = 0;
+  window.login_fr = 0;
+  window.connect();
+  return {strategy: 'connect()', state: st()};
+}
+return {strategy: 'nothing-applicable', state: s0};
+"""
+
+# --- best-effort consent/CMP dismissal (top document only) -------------------
+# The mirrored real client ships no CMP, and synthetic JS clicks bypass any
+# overlay anyway — this exists for the human manual-join path and for future
+# client changes.  Consent-looking iframes are detected and REPORTED only.
+DISMISS_CONSENT = """
+const out = {clicked: [], present: [], iframes: []};
+const SELECTORS = [
+  '.fc-consent-root .fc-cta-consent',
+  '.fc-consent-root button.fc-primary-button',
+  '#qc-cmp2-ui button[mode="primary"]',
+  '#onetrust-accept-btn-handler',
+  '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+  '.cmpboxbtnyes'
+];
+for (const sel of SELECTORS) {
+  const el = document.querySelector(sel);
+  if (!el) continue;
+  out.present.push(sel);
+  const r = el.getBoundingClientRect();
+  if (r.width > 0 && r.height > 0) { el.click(); out.clicked.push(sel); }
+}
+for (const f of document.querySelectorAll('iframe')) {
+  const sig = (f.src || '') + ' ' + (f.id || '') + ' ' + (f.name || '');
+  if (/consent|cmp|fundingchoices|sp_msg|privacy/i.test(sig)) {
+    out.iframes.push({src: (f.src || '').slice(0, 120), id: f.id || null});
+  }
+}
+return out;
+"""
+
+# --- menu diagnosis for the join-failure path --------------------------------
+DIAGNOSE_MENU = """
+function kind(v) {
+  if (v === undefined) return 'undefined';
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'array[' + v.length + ']';
+  return typeof v;
+}
+const pb = window.play_btn;
+const diag = {
+  href: location.href,
+  protocol: location.protocol,
+  readyState: document.readyState,
+  globals: {
+    play_btn: kind(pb),
+    play_btn_elem: pb ? kind(pb.elem) : null,
+    play_btn_disabled: pb ? !!pb.disabled : null,
+    connect: kind(window.connect),
+    forceServer: kind(window.forceServer),
+    playing: !!window.playing,
+    connecting: !!window.connecting,
+    connected: !!window.connected,
+    want_play: !!window.want_play,
+    waiting_for_sos: !!window.waiting_for_sos,
+    sos_len: (window.sos && window.sos.length) || 0,
+    bso: (window.bso && window.bso.ip) ? String(window.bso.ip) + ':' + String(window.bso.po) : null,
+    dead_mtm: (typeof window.dead_mtm === 'number') ? window.dead_mtm : kind(window.dead_mtm),
+    login_fr: (typeof window.login_fr === 'number') ? window.login_fr : kind(window.login_fr),
+    shoa: !!window.shoa,
+    grd: (typeof window.grd === 'number') ? window.grd : null,
+    ws: window.ws ? {readyState: window.ws.readyState, url: String(window.ws.url || '')} : null
+  },
+  buttons: [],
+  center_stack: [],
+  consent_iframes: []
+};
+const seen = new Set();
+const candidates = [];
+for (const rootSel of ['#login', '#playh']) {
+  const root = document.querySelector(rootSel);
+  if (root) { candidates.push(...root.querySelectorAll('div,button,a')); }
+}
+candidates.push(...document.querySelectorAll('.btnt'));
+for (const el of candidates) {
+  if (diag.buttons.length >= 12 || seen.has(el)) continue;
+  seen.add(el);
+  const r = el.getBoundingClientRect();
+  const text = (el.textContent || '').trim().slice(0, 30);
+  if (!text && r.width === 0) continue;
+  diag.buttons.push({
+    tag: el.tagName.toLowerCase(),
+    id: el.id || null,
+    cls: (el.className && String(el.className).slice(0, 60)) || null,
+    text: text,
+    visible: r.width > 0 && r.height > 0,
+    rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]
+  });
+}
+let at = document.elementFromPoint(Math.round(innerWidth / 2), Math.round(innerHeight / 2));
+while (at && diag.center_stack.length < 6) {
+  diag.center_stack.push(at.tagName.toLowerCase() + (at.id ? '#' + at.id : ''));
+  at = at.parentElement;
+}
+for (const f of document.querySelectorAll('iframe')) {
+  const sig = (f.src || '') + ' ' + (f.id || '') + ' ' + (f.name || '');
+  if (/consent|cmp|fundingchoices|sp_msg|privacy/i.test(sig)) {
+    diag.consent_iframes.push({src: (f.src || '').slice(0, 120), id: f.id || null});
+  }
+}
+return diag;
 """
 
 # --- probe: which globals exist and look right ---
+# kind() distinguishes 'null' (declared, not yet populated — e.g. `snake`
+# on the menu) from undefined/missing (returned as null -> MISSING).
 PROBE = """
 function kind(v) {
-  if (v === undefined || v === null) return null;
+  if (v === undefined) return null;
+  if (v === null) return 'null';
   if (Array.isArray(v)) return 'array[' + v.length + ']';
   return typeof v;
 }

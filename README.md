@@ -213,6 +213,11 @@ automatically; override with `SLITHER_BOT_CHROME_BINARY` /
    the plausible replacements it found; update the names at the top of
    `slither_bot/live/js_bridge.py` and re-probe. If the measured
    `SPEED_SCALE` / radius differ from the constants there, update those too.
+   If **auto-join fails**, the probe prints a full menu diagnosis (page
+   protocol, join state, candidate buttons, consent overlays) and then waits
+   for you to click Play yourself, so the measurements and fixture dump still
+   complete. `--play-timeout` and `--server IP:PORT` (pin a game server via
+   the client's `forceServer`) are available on probe/run/eval.
 2. **Steering sanity** — one minute of the random pilot; the cursor is never
    touched and the snake must not boost:
 
@@ -230,11 +235,18 @@ automatically; override with `SLITHER_BOT_CHROME_BINARY` /
 5. Optional degraded mode: `--backend vision` (pixels only, no game-state
    reads except the alive check).
 
-Troubleshooting: keep the game window visible and in the foreground
-(background tabs are throttled; the backend already passes
+Troubleshooting: the game's sockets are insecure `ws://`, so if the page
+loads as **https** (Chrome auto-upgrades typed URLs) every connection is
+blocked as mixed content and joining hangs — the backend passes
+`--disable-features=HttpsUpgrades,...` and `--allow-running-insecure-content`
+against this; if it persists, allow insecure content for slither.io in Chrome
+site settings. A join hang with `sos=0` in the `[join]` log means the server
+list itself never loaded (site outage). Keep the game window visible and in
+the foreground (background tabs are throttled; the backend already passes
 `--disable-background-timer-throttling`). `SLITHER_BOT_HEADLESS=1` forces
-headless Chrome. The optional Selenium integration test runs against a local
-fake game page: `SLITHER_BOT_IT=1 python -m pytest tests/test_live_integration.py`.
+headless Chrome. The Selenium integration tests run against a local fake game
+page implementing the real client's join machinery:
+`SLITHER_BOT_IT=1 python -m pytest tests/test_live_integration.py`.
 
 ## Repo layout
 

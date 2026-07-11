@@ -107,11 +107,23 @@ def make_backend(args) -> Backend:
     if args.backend == "live":
         from slither_bot.live.backend import LiveBackend
 
-        return LiveBackend(url=args.url, hz=args.hz, allow_boost=args.boost)
+        return LiveBackend(
+            url=args.url,
+            hz=args.hz,
+            allow_boost=args.boost,
+            play_timeout=args.play_timeout,
+            force_server=args.server,
+        )
     if args.backend == "vision":
         from slither_bot.live.vision_backend import VisionBackend
 
-        return VisionBackend(url=args.url, hz=args.hz, allow_boost=args.boost)
+        return VisionBackend(
+            url=args.url,
+            hz=args.hz,
+            allow_boost=args.boost,
+            play_timeout=args.play_timeout,
+            force_server=args.server,
+        )
     raise SystemExit(f"unknown backend {args.backend!r}")
 
 

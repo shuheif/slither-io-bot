@@ -13,6 +13,7 @@ Chrome — on a normal macOS machine no manual setup is required.
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import time
@@ -39,6 +40,16 @@ def make_driver(headless: bool = False) -> webdriver.Chrome:
     )
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         options.add_argument("--no-sandbox")  # required when running as root
+    # slither.io's game sockets are hardcoded insecure ws:// — if Chrome
+    # silently upgrades http://slither.io to https:// (default since M117),
+    # every socket is blocked as mixed content and joining hangs forever.
+    # Unknown feature names in the list are ignored harmlessly.
+    options.add_argument(
+        "--disable-features=HttpsUpgrades,HttpsFirstBalancedMode,"
+        "HttpsFirstModeV2ForEngagedSites,HttpsFirstModeIncognito"
+    )
+    options.add_argument("--allow-running-insecure-content")
+    options.add_argument("--autoplay-policy=no-user-gesture-required")
     options.add_argument("--window-size=900,700")
     # Keep the game loop running at full rate even if the window loses focus.
     options.add_argument("--disable-background-timer-throttling")
@@ -63,6 +74,7 @@ class LiveBackend:
         view_radius: float = 1200.0,
         headless: bool = False,
         play_timeout: float = 30.0,
+        force_server: str | None = None,
     ) -> None:
         self.url = url
         self.dt = 1.0 / hz
@@ -71,8 +83,11 @@ class LiveBackend:
         self.view_radius = view_radius
         self.headless = headless
         self.play_timeout = play_timeout
+        self.force_server = force_server or os.environ.get("SLITHER_BOT_FORCE_SERVER")
         self.death_cause: str | None = None
         self.driver: webdriver.Chrome | None = None
+        self.last_join_log: list[dict] = []
+        self.join_diagnosis: dict | None = None
         self._t0: float | None = None
         self._next_tick = 0.0
         self._boosting = False
@@ -97,19 +112,91 @@ class LiveBackend:
         driver = self._ensure_driver()
         self.death_cause = None
         self._t0 = None
+        self.last_join_log = []
+        self.join_diagnosis = None
+
+        if self.force_server:
+            ip, _, port = self.force_server.partition(":")
+            driver.execute_script(
+                "if (typeof window.forceServer === 'function')"
+                "{ window.forceServer(arguments[0], arguments[1]); return true; } return false;",
+                ip,
+                int(port or 444),
+            )
+            print(f"[join] pinned server {self.force_server}")
+
+        consent = driver.execute_script(js_bridge.DISMISS_CONSENT) or {}
+        consent_found = bool(consent.get("present"))
+        if consent_found or consent.get("iframes"):
+            print(
+                f"[join] consent overlays: clicked={consent.get('clicked')} "
+                f"iframes={len(consent.get('iframes', []))}"
+            )
+            self.last_join_log.append({"strategy": "dismiss-consent", "state": consent})
+
         deadline = time.monotonic() + self.play_timeout
+        force_at = time.monotonic() + self.play_timeout / 2.0
+        attempt = 0
+        last_line = None
         percept = self.read_percept()
         while not percept.alive and time.monotonic() < deadline:
-            driver.execute_script(js_bridge.PLAY, self.nickname)
+            attempt += 1
+            # After half the budget with no join, break any stuck client latch
+            # by escalating to a direct connect().
+            force = time.monotonic() >= force_at
+            result = driver.execute_script(js_bridge.PLAY, self.nickname, force)
+            if isinstance(result, dict):
+                self.last_join_log.append(result)
+                state = result.get("state") or {}
+                line = (
+                    f"{result.get('strategy')} playing={state.get('playing')} "
+                    f"connecting={state.get('connecting')} want_play={state.get('want_play')} "
+                    f"sos={state.get('sos_len')} {state.get('protocol')}"
+                )
+                if line != last_line:
+                    print(f"[join] attempt {attempt}: {line}")
+                    last_line = line
+            if consent_found and attempt % 5 == 0:
+                driver.execute_script(js_bridge.DISMISS_CONSENT)
             time.sleep(1.0)
             percept = self.read_percept()
+
         if not percept.alive:
-            raise TimeoutError(
-                f"could not join a game within {self.play_timeout:.0f}s — "
-                "is the menu visible? run `python -m slither_bot probe` to check the page"
-            )
+            try:
+                self.join_diagnosis = driver.execute_script(js_bridge.DIAGNOSE_MENU)
+            except Exception:
+                self.join_diagnosis = None
+            raise TimeoutError(self._join_failure_message())
         self._next_tick = time.monotonic() + self.dt
         return percept
+
+    def _join_failure_message(self) -> str:
+        diag = self.join_diagnosis or {}
+        g = diag.get("globals", {})
+        if diag.get("protocol") == "https:":
+            hint = (
+                "the page loaded as https, so the game's insecure ws:// sockets are blocked "
+                "as mixed content (the backend passes flags against Chrome's auto-upgrade; "
+                "if this persists, allow insecure content for slither.io in Chrome settings)"
+            )
+        elif g.get("waiting_for_sos") or g.get("sos_len") == 0:
+            hint = (
+                "the server list (/i33628.txt) never loaded — slither.io outage or the "
+                "request is blocked on this network"
+            )
+        elif g.get("connecting"):
+            hint = (
+                "stuck connecting: the game socket never opens — servers unreachable from "
+                "this network or ws:// blocked; try --server ip:port or another network"
+            )
+        else:
+            hint = "no join strategy took effect — the menu may have changed; see the diagnosis"
+        compact = json.dumps(diag, separators=(",", ":"))[:1500] if diag else "unavailable"
+        return (
+            f"could not join a game within {self.play_timeout:.0f}s — {hint}.\n"
+            f"menu diagnosis: {compact}\n"
+            f"run `python -m slither_bot probe` for full diagnostics and a manual-join fallback"
+        )
 
     def step(self, action: Action) -> Percept:
         driver = self._ensure_driver()
