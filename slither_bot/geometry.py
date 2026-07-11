@@ -107,3 +107,8 @@ def wrap_angle(theta: float) -> float:
     """Wrap to (-pi, pi]."""
     wrapped = float(np.arctan2(np.sin(theta), np.cos(theta)))
     return np.pi if wrapped == -np.pi else wrapped
+
+
+def wrap_angles(theta: np.ndarray) -> np.ndarray:
+    """Vectorized wrap to [-pi, pi)."""
+    return np.arctan2(np.sin(theta), np.cos(theta))

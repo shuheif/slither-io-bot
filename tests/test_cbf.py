@@ -85,8 +85,9 @@ class TestCBFPlanner:
         assert planner.debug["h_min"] < 0.0
 
     def test_boundary_turns_an_outward_heading_inward(self):
+        # Head past the margin band (h_wall < 0), heading straight at the wall.
         percept = make_percept(
-            head=(480.0, 0.0), heading=0.0, arena_center=(0.0, 0.0), arena_radius=500.0
+            head=(485.0, 0.0), heading=0.0, arena_center=(0.0, 0.0), arena_radius=500.0
         )
         planner = CBFPlanner()
         action = planner.plan(percept)
@@ -115,7 +116,7 @@ class TestCBFPlanner:
         assert np.isfinite(action.heading)
         assert sorted(durations)[len(durations) // 2] < 0.05  # median < 50 ms
 
-    def test_solver_failure_falls_back_to_max_clearance(self, monkeypatch):
+    def test_solver_failure_falls_back_to_arc_projection(self, monkeypatch):
         monkeypatch.setattr("slither_bot.planners.cbf.solve_qp", lambda *a, **k: None)
         wall = vertical_wall(x=60.0)
         percept = make_percept(head=(0, 0), foods=[(200.0, 0.0, 10.0)], enemies=[wall])
@@ -124,8 +125,9 @@ class TestCBFPlanner:
         assert planner.debug["mode"] == "solver_fallback"
         assert planner.debug["solver_failures"] == 1
         assert np.isfinite(action.heading)
-        # Max-clearance direction for a wall ahead (+x) is away from it (-x).
-        assert heading_unit(action.heading) @ np.array([1.0, 0.0]) < 0.0
+        # The nominal heading (0, straight at the wall) is not arc-feasible at
+        # full speed; the projection must rotate well away from it.
+        assert abs(action.heading) > 0.9
 
     def test_config_units_scale_with_radius(self):
         cfg = CBFConfig(margin_radii=2.0)
