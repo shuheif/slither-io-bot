@@ -103,20 +103,22 @@ class TestGlobalNameTemplating:
             assert "__SNAKE__" not in js
             assert "__SNAKES__" not in js
             assert "__FOODS__" not in js
-        assert 'window["snake"]' in js_bridge.READ_STATE
-        assert 'window["snakes"]' in js_bridge.READ_STATE
+        # Defaults are the probe-verified names of the live 2026 client.
+        assert 'window["slither"]' in js_bridge.READ_STATE
+        assert 'window["slithers"]' in js_bridge.READ_STATE
         assert 'window["foods"]' in js_bridge.READ_STATE
 
     def test_set_global_names_round_trip(self):
+        saved = dict(js_bridge.GLOBALS)
         try:
-            js_bridge.set_global_names(snakes="slithers", foods="fud")
-            assert js_bridge.GLOBALS["snakes"] == "slithers"
-            assert 'window["slithers"]' in js_bridge.READ_STATE
-            assert 'window["fud"]' in js_bridge.READ_STATE
-            assert 'window["slithers"]' in js_bridge.PROBE
+            js_bridge.set_global_names(snakes="wurms", foods="pellets")
+            assert js_bridge.GLOBALS["snakes"] == "wurms"
+            assert 'window["wurms"]' in js_bridge.READ_STATE
+            assert 'window["pellets"]' in js_bridge.READ_STATE
+            assert 'window["wurms"]' in js_bridge.PROBE
         finally:
-            js_bridge.set_global_names(snake="snake", snakes="snakes", foods="foods")
-        assert 'window["snakes"]' in js_bridge.READ_STATE
+            js_bridge.set_global_names(**saved)
+        assert 'window["slithers"]' in js_bridge.READ_STATE
 
     def test_none_values_keep_current_names(self):
         before = dict(js_bridge.GLOBALS)

@@ -209,14 +209,15 @@ automatically; override with `SLITHER_BOT_CHROME_BINARY` /
    python -m slither_bot probe
    ```
 
-   Current client builds **rename** some state globals (a 2026 build was
-   observed with `window.snake`/`window.snakes` gone while everything else
-   survived). The probe handles this: when it detects a joined game whose
-   state it cannot see, it scans `window` for the new names, **verifies them
-   live**, finishes its measurements with them, and prints the exact values
-   to make permanent in `GLOBALS` at the top of
-   `slither_bot/live/js_bridge.py`. If the measured `SPEED_SCALE` / radius
-   differ from the constants there, update those too.
+   Client builds **rename** state globals from time to time: the live build
+   as of 2026-07 (served at `slither.com/io`) uses `slither`/`slithers`
+   instead of the classic `snake`/`snakes` — those are already the defaults
+   in `GLOBALS` (`slither_bot/live/js_bridge.py`), probe-verified together
+   with `SPEED_SCALE ≈ 31.2` and the map (`grd` 32550). If the client drifts
+   again, the probe detects a joined game whose state it cannot see, scans
+   `window` for the new names, **verifies them live**, finishes its
+   measurements with them, and prints the exact values to make permanent in
+   `GLOBALS`.
    If **auto-join fails outright**, the probe prints a full menu diagnosis
    (page protocol, join state machine, candidate buttons, consent overlays)
    and then waits for you to click Play yourself, so the verification still

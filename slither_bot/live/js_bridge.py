@@ -40,13 +40,15 @@ import numpy as np
 from slither_bot.core import Percept, Snake, empty_body, empty_foods
 
 RADIUS_PER_SC = 14.5  # wu of collision radius per unit of .sc (client draws ~29*sc px wide)
-SPEED_SCALE = 32.0  # wu/s per unit of .sp (normal sp ~ 5.8 -> ~185 wu/s)
+SPEED_SCALE = 31.2  # wu/s per unit of .sp (probe-measured 2026-07: 180.8 wu/s at sp 5.79)
 
 # The game-state global names for the current client build.  If the probe
 # reports verified renames, update the VALUES here (keys stay fixed).
+# 2026-07, probe-verified on the live game (slither.com/io build): the
+# classic `snake`/`snakes` are now `slither`/`slithers`; `foods` unchanged.
 GLOBALS = {
-    "snake": "snake",
-    "snakes": "snakes",
+    "snake": "slither",
+    "snakes": "slithers",
     "foods": "foods",
 }
 
@@ -128,17 +130,18 @@ if (typeof window.setAcceleration === 'function') { window.setAcceleration(argum
 """
 
 # --- start a game from the menu ----------------------------------------------
-# The client's own Enter-key handler runs `play_btn.elem.onclick()`, whose
-# handler latches `want_play`; the main loop then calls `connect()` once the
-# server list (`sos`, fetched from /i33628.txt) is ready.  One click is enough:
-# while `connecting`/`want_play`/`waiting_for_sos` the client is already busy
+# Strategy: dispatch a real mouse-event sequence on the play button
+# (`play_btn.elem` when the client exposes it, else the `#playh` DOM) — a
+# dispatched click triggers exactly the handlers a human click does, whether
+# wired as an onclick property or addEventListener, and it is fired even when
+# `play_btn.disabled` reads true: a 2026 build keeps that flag true while the
+# button demonstrably works (verified by a human click).  While
+# `connecting`/`want_play`/`waiting_for_sos` the client is already busy
 # self-retrying (it rotates servers every ~3.3 s), so we report state instead
-# of clicking again.  A disabled play_btn only skips the button strategy —
-# some builds keep it disabled while connect() works fine (observed 2026).
-# Working bots' direct-join fallback is `dead_mtm = 0; login_fr = 0; connect()`
-# — it bypasses the button and ad gates entirely and reads the nickname from
-# #nick at ws.onopen.
-# arguments[0] = nickname, arguments[1] = force (skip buttons, connect() now).
+# of clicking again.  The escalation (force) is working bots' direct join:
+# `dead_mtm = 0; login_fr = 0; connect()` — bypasses the button and ad gates
+# entirely; connect() reads the nickname from #nick at ws.onopen.
+# arguments[0] = nickname, arguments[1] = force (skip the button, connect()).
 # Returns {strategy, state}.
 PLAY = """
 function st() {
@@ -159,21 +162,21 @@ if (nick && arguments[0]) { nick.value = arguments[0]; }
 const force = !!arguments[1];
 const s0 = st();
 if (s0.playing) { return {strategy: 'already-playing', state: s0}; }
-if (!force && (s0.connecting || s0.want_play || s0.waiting_for_sos)) {
+// waiting_for_sos only matters while the server list is actually empty —
+// a 2026 build leaves the flag true after sos loads (observed live).
+if (!force && (s0.connecting || s0.want_play || (s0.waiting_for_sos && !s0.sos_len))) {
   return {strategy: 'join-in-progress', state: s0};
 }
-const pb = window.play_btn;
-if (!force && pb && pb.elem && typeof pb.elem.onclick === 'function' && !pb.disabled) {
-  pb.elem.onclick();
-  return {strategy: 'play_btn.elem.onclick', state: st()};
-}
-if (!force && !s0.btn_disabled) {
-  const btn = document.querySelector('#playh .btnt') || document.querySelector('#playh div');
+if (!force) {
+  const pb = window.play_btn;
+  const btn = (pb && pb.elem && pb.elem.dispatchEvent)
+    ? pb.elem
+    : (document.querySelector('#playh .btnt') || document.querySelector('#playh div'));
   if (btn) {
     for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
       btn.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));
     }
-    return {strategy: 'dom-events', state: st()};
+    return {strategy: 'button-events', state: st()};
   }
 }
 if (typeof window.connect === 'function') {
@@ -334,6 +337,9 @@ for (const name of Object.getOwnPropertyNames(window)) {
       has_sz: typeof item.sz === 'number' || typeof item.rad === 'number'
     });
   } else if (v && typeof v === 'object') {
+    // window aliases (globalThis/self/top/...) inherit the client's global
+    // xx/yy vars and would pollute the candidates (observed live).
+    if (v === window || v === document) continue;
     let xx, yy, ang, pts;
     try { xx = v.xx; yy = v.yy; ang = v.ang; pts = v.pts; } catch (e) { continue; }
     if (typeof xx === 'number' && typeof yy === 'number') {

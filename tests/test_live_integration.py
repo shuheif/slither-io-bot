@@ -31,10 +31,11 @@ FAKE_PAGE = (Path(__file__).parent / "fixtures" / "fake_slither.html").resolve()
 def _restore_global_names():
     # The probe's rescue path rebinds js_bridge.GLOBALS for the session;
     # keep tests independent of each other.
-    yield
     from slither_bot.live import js_bridge
 
-    js_bridge.set_global_names(snake="snake", snakes="snakes", foods="foods")
+    saved = dict(js_bridge.GLOBALS)
+    yield
+    js_bridge.set_global_names(**saved)
 
 
 def page_url(variant: str | None = None) -> str:
@@ -61,7 +62,7 @@ def test_live_backend_full_loop_against_fake_page():
     try:
         percept = backend.reset()
         assert percept.alive
-        assert "play_btn.elem.onclick" in join_strategies(backend)
+        assert "button-events" in join_strategies(backend)
         # The game keeps moving while reset() polls, so allow drift from spawn.
         assert percept.self_snake.head == pytest.approx([21600.0, 21600.0], abs=600.0)
         assert percept.arena_radius == pytest.approx(21600.0)
@@ -90,7 +91,18 @@ def test_join_via_dom_events_when_no_play_btn_object():
     backend = make_backend("domclick")
     try:
         assert backend.reset().alive
-        assert "dom-events" in join_strategies(backend)
+        assert "button-events" in join_strategies(backend)
+    finally:
+        backend.close()
+
+
+def test_join_clicks_button_despite_disabled_flag():
+    # The live 2026 client keeps play_btn.disabled true while the button works.
+    backend = make_backend("disabledbtn")
+    try:
+        assert backend.reset().alive
+        assert "button-events" in join_strategies(backend)
+        assert backend.driver.execute_script("return window.play_btn.disabled") is True
     finally:
         backend.close()
 
@@ -190,10 +202,10 @@ def test_probe_rescues_renamed_globals_end_to_end(tmp_path, capsys):
     assert "VERIFIED renamed globals" in out
     assert "probe PASSED" in out
     assert "Traceback" not in out
-    assert js_bridge.GLOBALS["snakes"] == "slithers"  # applied for the session
+    assert js_bridge.GLOBALS["snakes"] == "wurms"  # applied for the session
 
     report = json.loads((tmp_path / "probe_report.json").read_text())
-    assert report["renamed_globals"] == {"snake": "slither", "snakes": "slithers", "foods": "fud"}
+    assert report["renamed_globals"] == {"snake": "wurm", "snakes": "wurms", "foods": "pellets"}
     assert (tmp_path / "live_dump.json").exists()  # measurements + fixture still ran
 
 

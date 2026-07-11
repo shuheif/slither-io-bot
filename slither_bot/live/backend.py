@@ -155,9 +155,9 @@ class LiveBackend:
                 if snake_missing_strikes >= 3:
                     break
             attempt += 1
-            # After half the budget with no join, break any stuck client latch
-            # by escalating to a direct connect().
-            force = time.monotonic() >= force_at
+            # Escalate to a direct connect() after a handful of quiet attempts
+            # (or half the budget) — proven live to break stuck menus.
+            force = attempt >= 6 or time.monotonic() >= force_at
             result = driver.execute_script(js_bridge.PLAY, self.nickname, force)
             if isinstance(result, dict):
                 self.last_join_log.append(result)
@@ -167,7 +167,8 @@ class LiveBackend:
                     f"connecting={state.get('connecting')} want_play={state.get('want_play')} "
                     f"sos={state.get('sos_len')} {state.get('protocol')}"
                 )
-                if line != last_line:
+                # Print on change, plus a heartbeat so a stuck join is visible.
+                if line != last_line or attempt % 5 == 0:
                     print(f"[join] attempt {attempt}: {line}")
                     last_line = line
             if consent_found and attempt % 5 == 0:

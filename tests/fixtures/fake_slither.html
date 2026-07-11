@@ -14,11 +14,14 @@
        nobutton        no button at all — exercises the direct connect() strategy
        consent         'full' plus a Funding-Choices-style consent overlay —
                        exercises DISMISS_CONSENT
+       disabledbtn     'full' but play_btn.disabled stays true while the
+                       button still works when clicked — mirrors the live
+                       2026 client, exercises click-despite-disabled
        deadmenu        nothing to click and no connect() — join is impossible,
                        exercises the timeout + DIAGNOSE_MENU path
-       renamed         'full' but the state globals are named slither /
-                       slithers / fud (snake/snakes/foods left undefined) —
-                       exercises the snake_missing fail-fast and the probe's
+       renamed         'full' but the state globals are named wurm / wurms /
+                       pellets (defaults left undefined) — exercises the
+                       snake_missing fail-fast and the probe's
                        scan -> set_global_names -> verify rescue -->
 <head><meta charset="utf-8"><title>fake slither</title></head>
 <body>
@@ -29,11 +32,12 @@
 <script>
 var variant = new URLSearchParams(location.search).get('variant') || 'full';
 
-// The 'renamed' variant simulates a client build whose minifier changed the
-// state global names; snake/snakes/foods stay UNDEFINED there.
+// Default names mirror the LIVE 2026 client (slither/slithers/foods, as
+// probe-verified); the 'renamed' variant simulates the NEXT rename, leaving
+// the defaults undefined so the scanner rescue is exercised.
 var NAMES = variant === 'renamed'
-  ? {snake: 'slither', snakes: 'slithers', foods: 'fud'}
-  : {snake: 'snake', snakes: 'snakes', foods: 'foods'};
+  ? {snake: 'wurm', snakes: 'wurms', foods: 'pellets'}
+  : {snake: 'slither', snakes: 'slithers', foods: 'foods'};
 
 window.playing = false;
 window.connecting = false;
@@ -82,18 +86,21 @@ if (variant !== 'deadmenu') {
   };
 }
 
-if (variant === 'full' || variant === 'consent' || variant === 'renamed') {
-  // The real client builds the button in JS and joins via play_btn.elem.onclick,
-  // which latches want_play; the main loop then calls connect().
+if (variant === 'full' || variant === 'consent' || variant === 'renamed'
+    || variant === 'disabledbtn') {
+  // The real client builds the button in JS and joins via its onclick, which
+  // latches want_play; the main loop then calls connect().  The live 2026
+  // client keeps play_btn.disabled === true while the button still works —
+  // like there, this handler does NOT honor the flag.
   var pbdiv = document.createElement('div');
   pbdiv.className = 'btnt nsi sadg1';
   pbdiv.textContent = 'Play';
   document.getElementById('playh').appendChild(pbdiv);
   pbdiv.onclick = function () {
-    if (window.want_play || window.play_btn.disabled) return;
+    if (window.want_play) return;
     window.want_play = true;
   };
-  window.play_btn = {disabled: false, elem: pbdiv, btnf: pbdiv};
+  window.play_btn = {disabled: variant === 'disabledbtn', elem: pbdiv, btnf: pbdiv};
 } else if (variant === 'domclick') {
   var btn = document.createElement('div');
   btn.className = 'btnt';
